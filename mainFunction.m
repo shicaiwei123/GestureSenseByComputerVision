@@ -13,7 +13,7 @@ backGroundRead=img(80:end,80:end-80,:);
 %% 先相减再处理
 %读入图片初始化
 %相减，当像素均值低于一定阈值认为背景已经固定，开始进行下一步
-while(1)
+while(1)  %大循环，一直不退出
 readCnt=1;
 imgSubMean=100;
 imgRead=[];
@@ -115,6 +115,7 @@ end
 %检测看手是否开始移动，若是开始，则开始记录帧间的质心直到手离开画面或者再次停止
 %图片坐标系是从左上角开始，水平是x，竖直是y。所以负值是往右下角方向移动，正是往左上角移动
 %单独求质心的x和y值
+while(1)    %直到手离开相机范围内之后，才跳出这个循环
 tic
 xAxisTemp=0;  %质心坐标初始化
 yAxisTemp=0;
@@ -128,8 +129,8 @@ direction=0; %方向，正为左，负为右，1为水平，2为竖直
 numMove=1;   %记录读入的图片数，两张之后开始做减法
 numStable=1;
 
-while(1)
-       while(1)
+% while(1)         
+       while(1)   %直到手开始运动才跳出这个循环
            %读入数据
 %           if(strRead>9)
 %               imgRead=imread(['000',num2str(strRead),'.bmp']);
@@ -168,7 +169,7 @@ while(1)
 %            readCnt=readCnt+1;
        end
        %开始记录轨迹
-       while(1)
+       while(1)%直到手势运行结束才跳出这个循环
            %读入数据
 %           if(strRead>9)
 %               imgRead=imread(['000',num2str(strRead),'.bmp']);
@@ -196,18 +197,32 @@ while(1)
               pos.x(i)=xAxisTemp;
               pos.y(i)=yAxisTemp;
               i=i+1; 
+              numStable=0;               %一旦移动则重新计数
           else                            %否则认为手停止，或者是已经划出了摄像头
              numStable=numStable+1; 
           end
-          if(numStable>8)            %连续两次停止，则任务手势识别结束，
+          if(numStable>15)            %连续8次停止，则任务手势识别结束，
               display('手移动完成开始检测手势');
               break;
           end
-       end
-       break;                     %手势记录结束，开始识别
-end
+       end  
+%        break;                     %手势记录结束，开始识别
+% end
      stdX=std(pos.x);            %求x轴y轴标准差
      stdY=std(pos.y);
+     if((stdX>20)&&(stdY>20))    %识别为圆
+         xTemp=pos.x;
+%          stdYTemp=stdY;  
+         xTemp(xTemp<0)=0;
+         postiveX=find(xTemp);  %找到正向变化的x的坐标值
+         yTemp=pos.y(postiveX);
+         if(yTemp(2)>yTemp(1))  %如果差分为负那么是顺时针，否则为逆时针，假设至少有两张图片
+             display('顺时针');
+         else
+             display('逆时针')
+         end
+     else
+         
      if(stdX>stdY)
          if(pos.x(1)>pos.x(end))
          drection=2;  
@@ -226,8 +241,19 @@ end
          end
      end
  toc  
- pause(4);
+         img=snapshot(myCam);
+         imgRead=img(80:end,80:end-80,:);
+         imshow(imgRead);
+         imgSub=imgRead-backGroundRead;
+         imgPrcess=gestureSeg(imgSub);   
+         imgSubMean=mean(imgPrcess(:));
+         if(imgSubMean<0.001)    %手离开了摄像头范围   
+             break;
+          end
+        end
+    end
 end
+    pause(4);
  delete(myCam);
 %     tic
 %     img=imgRead-backGroundRead;
