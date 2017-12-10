@@ -1,13 +1,17 @@
 %主函数
 %手离开摄像头的逻辑
-%只录制到一张图片的问题
-%这两个都要解决
-%刷新率
 %算法逻辑
 %开启摄像头时，先检测确定背景已经静止，一直检测到45帧的帧差低于一个阈值时才算是背景静止
 %然后检测手进入摄像头范围和手静止，也就是开始做手势（这是基于在手势开始和结束之前要有一个停顿，方便特征提取）
 %然后检测手是否开始运动，开始运动则开始记录，然后直到手停止
 %提取这段时间的内的图片的特征量做手势识别
+
+%要求
+%背景可以移动，但是在手移动范围内不能有肤色和近肤色物体存在，不然会影响判决
+%如果想要更好的使用手离开摄像头判决的逻辑两个办法
+%一个是背景中完全无肤色和近肤色物体，二是跟根据背景中的肤色范围大小手动调节阈值，但是这样背景就不能运动了
+%目前选择方案一，较为简单
+
 %% 初始化
 close all
 clear all
@@ -17,47 +21,8 @@ strRead=0;  %读图片的标号5
 myCam=webcam;
 img=snapshot(myCam);
 backGroundRead=img(80:end,80:end-80,:);
-%% 先相减再处理
-%读入图片初始化
-%相减，当像素均值低于一定阈值认为背景已经固定，开始进行下一步
 while(1)  %大循环，一直不退出
-readCnt=1;
-imgSubMean=100;
-imgRead=[];
-threshold=0;
-numBackGround=0;  %背景稳定的帧数
-hand=0;   %1手在摄像头范围，0不在。
-while(1)  %当背景稳定后退出
-%     imgRead=imread(['0000',num2str(strRead),'.bmp']);
-%     strRead=strRead+1;
-       img=snapshot(myCam);
-       imgRead=img(80:end,80:end-80,:);
-       imshow(imgRead);
-    if(readCnt>1)     %读入了两张图片就开始做减法
-        imgSub=imgTemp-imgRead;
-        imgTemp=imgRead;
-        imgSubGray=rgb2gray(imgSub);
-        imgSubMean=mean(imgSubGray(:));
-    else
-        imgTemp=imgRead;
-        imgGray=rgb2gray(imgRead);
-        threshold=mean(imgGray(:))/6;  %把原始图片的像素均值的1/6当做阈值，
-        imgSub=imgRead;
-        readCnt=readCnt+1;
-    end
-    if(numBackGround>45)   %连续44帧稳定，则背景稳定
-        backGroundRead=imgRead;
-        display('背景稳定');
-%         figure;
-%         imshow(gestureSeg(backGroundRead));
-        break;
-    end
-    if(imgSubMean<threshold)       %当总体像素低于这个值时，认为背景稳定，状态机进入下一个状态
-        numBackGround=numBackGround+1;
-    else
-        numBackGround=0;
-    end
-end
+
 
 %开始检测手进入
 %如果相减做手势分割后有阈值高于一定程度就视为有手进入
@@ -75,25 +40,18 @@ while(1)
     imgRead=img(80:end,80:end-80,:);
     imshow(imgRead);
     imgSub=imgRead-backGroundRead;
+    backGroundRead=imgRead;
     imgPrcess=gestureSeg(imgSub);
     imgSubMean=mean(imgPrcess(:));
     if(imgSubMean>0.001)    %有手进入开始开始等待手稳定,二值化话图片像素不再全为0
         display('手进入');
         hand=1;
         while(1)
-%           if(strRead>9)
-%                imgRead=imread(['000',num2str(strRead),'.bmp']);
-%           elseif(strRead>99)
-%                imgRead=imread(['00',num2str(strRead),'.bmp']);
-%           else
-%               imgRead=imread(['0000',num2str(strRead),'.bmp']);
-%           end
-%           imshow(imgRead);
-%           strRead=strRead+1;
           img=snapshot(myCam);
           imgRead=img(80:end,80:end-80,:);
           imshow(imgRead);
           imgSub=imgRead-backGroundRead;
+          backGroundRead=imgRead;
           imgPrcess=gestureSeg(imgSub);
           [xAxis,yAxis]=find(imgPrcess);
           xAxisMean=mean(xAxis);
@@ -107,7 +65,8 @@ while(1)
           xAxisTemp=xAxisMean;
           yAxisTemp=yAxisMean;
           
-           if((xAxisSub<10)&&(yAxisSub<10))     %手势稳定，稳定手势的帧数加一
+%            if((xAxisSub<10)&&(yAxisSub<10))     %手势稳定，稳定手势的帧数加一
+           if(isnan(xAxisSub)&&isnan(yAxisSub))
                numStable=numStable+1;       
            else
                numStable=0;   %否则一旦波动重新计数
@@ -128,6 +87,8 @@ end
 %单独求质心的x和y值
 j=0;
 while(1)    %直到手离开相机范围内之后，才跳出这个循环
+figureStay=[];
+figureTime=1; %手势帧数静止判断
 xAxisTemp=0;  %质心坐标初始化
 yAxisTemp=0;
 xAxisSub=0;  %质心坐标差初始化
@@ -148,12 +109,22 @@ while(1)   %直到手开始运动或者手离开摄像头范围才跳出这个循环
       %求质心坐标
     %           imshow(imgRead);
       imgSub=imgRead-backGroundRead;
+      backGroundRead=imgRead;
       imgPrcess=gestureSeg(imgSub);  
-      imgSubMean=mean(imgPrcess);
-      if(imgSubMean<0.01)    %手离开了摄像头范围 
-         display('手离开了摄像头范围');
-         hand=0;
-         break;
+      imgSubMean=mean(imgPrcess(:));
+      if(imgSubMean<0.01)    %像素为近0时，手势静止判断加一
+          figureTime=figureTime+1;
+          if(figureTime>10) %连续十帧检测不到运动，则检查看手是否离开了摄像头
+              figureStay=gestureSeg(imgRead);  
+              imgSubMean=mean(figureStay(:));
+              if(imgSubMean<0.05)    %手离开了摄像头范围 
+                 display('手离开了摄像头范围');
+                 hand=0;
+                 break;
+              end
+          end
+      else
+          figureTime=1;
       end
       [xAxis,yAxis]=find(imgPrcess);
       xAxisMean=mean(xAxis);
@@ -197,6 +168,7 @@ while(1) %直到手势运行结束才跳出这个循环
       %求质心坐标
 
       imgSub=imgRead-backGroundRead;
+      backGroundRead=imgRead;
       imgPrcess=gestureSeg(imgSub);  
       [xAxis,yAxis]=find(imgPrcess);
       xAxisMean=mean(xAxis);
@@ -208,12 +180,7 @@ while(1) %直到手势运行结束才跳出这个循环
       if((xAxisSub>10)||(yAxisSub>10)) %手在移动
           pos.x(i)=xAxisTemp;
           pos.y(i)=yAxisTemp;
-          i=i+1; 
-    %               if(i>2)
-    %                 a=[pos.x;pos.y];
-    %                 insertMarker(imgRead,a','+','Color','red');
-    %                 imshow(imgRead);
-    %               end
+
           numStable=1;               %一旦移动则重新计数
       else                            %否则认为手停止，或者是已经划出了摄像头
          numStable=numStable+1; 
@@ -281,14 +248,3 @@ end
 
     pause(4);
  delete(myCam);
-
-%% 先处理再相减
-% clear all
-% tic
-% backGroundProcess=gestureSeg(backGroundRead);
-% imgProcess=gestureSeg(imgRead);
-% img=imgProcess-backGroundProcess;
-% img = bwareaopen(img,2500);  % 从二进制图像中移除所有少于2000像素的连接对象
-% toc
-% figure;
-% imshow(img);
